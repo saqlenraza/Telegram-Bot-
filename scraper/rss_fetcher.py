@@ -52,10 +52,19 @@ class RSSFetcher:
         if not title or not entry_id:
             return None
 
-        # Extract Udemy coupon URL from summary HTML
+        # Step 1: Extract Udemy coupon URL from summary HTML
+        # (works for TutorialBar, CouponScorpion, RealDiscount etc.)
         udemy_url = self._extract_udemy_url(summary + " " + source_url)
+
+        # Step 2: If not found AND source is Discudemy, fetch the
+        # Discudemy page to extract the real Udemy URL from its HTML
+        if not udemy_url and source == "Discudemy":
+            udemy_url = self._fetch_udemy_url_from_page(source_url)
+
+        # Step 3: If still no valid Udemy URL, skip this course entirely
+        # Do NOT fallback to Discudemy URL — only direct Udemy links allowed
         if not udemy_url:
-            udemy_url = source_url  # fallback to coupon site page
+            return None
 
         # Get category from tags — never return None
         tags     = entry.get("tags", [])
@@ -100,6 +109,25 @@ class RSSFetcher:
         except Exception:
             pass
         return None
+
+    def _fetch_udemy_url_from_page(self, page_url: str) -> str | None:
+        """Fetch a coupon site page and extract the real Udemy course URL.
+
+        Used for Discudemy whose RSS feed does not contain Udemy URLs
+        in the summary — the actual udemy.com link is only on the page.
+        """
+        import httpx
+        try:
+            resp = httpx.get(
+                page_url,
+                timeout=10,
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            match = UDEMY_URL_PATTERN.search(resp.text)
+            return match.group(0) if match else None
+        except Exception:
+            return None
 
     def _extract_image_url(self, entry, summary: str) -> str | None:
         """Extract course thumbnail URL from RSS entry.

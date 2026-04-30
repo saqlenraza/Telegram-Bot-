@@ -71,15 +71,18 @@ def format_message(course: dict) -> str:
     lines.append("")
 
     # ── Get Premium Course button ───────────────────────────────────
-    # URL inside () of MarkdownV2 link does NOT need escaping
-    lines.append(f"👉 [Get Premium Course]({url})")
+    # In MarkdownV2, the URL part inside () needs minimal escaping:
+    # only ) and \ need escaping — other chars are fine in the URL
+    safe_url = url.replace('\\', '\\\\').replace(')', '\\)')
+    lines.append(f"👉 [Get Premium Course]({safe_url})")
 
     # ── Blank line ──────────────────────────────────────────────────
     lines.append("")
 
     # ── Hashtags ────────────────────────────────────────────────────
+    # In MarkdownV2, # must be escaped as \# so it renders as plain text
     category_hashtag = _make_category_hashtag(category)
-    lines.append(f"#FreeCourses #Udemy {category_hashtag} #Learning")
+    lines.append(f"\\#FreeCourses \\#Udemy {category_hashtag} \\#Learning")
 
     return "\n".join(lines)
 
@@ -116,4 +119,4 @@ def _make_category_hashtag(category: str) -> str:
     hashtag = ''.join(word.capitalize() for word in words)
     if not hashtag:
         hashtag = "Course"
-    return f"#{hashtag}"
+    return f"\\#{hashtag}"

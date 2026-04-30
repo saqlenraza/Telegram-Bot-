@@ -5,6 +5,7 @@ Uses MarkdownV2 parse mode and send_photo for rich media posts.
 Handles errors gracefully — bot never crashes on a single failed post.
 """
 
+import re
 from telegram import Bot
 from telegram.constants import ParseMode
 from config import BOT_TOKEN, CHANNEL_ID
@@ -44,22 +45,45 @@ class TelegramPoster:
                 )
             return True
         except Exception as e:
-            print(f"[Poster] Failed: {e}")
-            # If MarkdownV2 fails, try sending as plain text fallback
+            print(f"[Poster] MarkdownV2 failed: {e}")
+            # If MarkdownV2 fails, strip all markdown and send clean plain text
+            clean_text = self._strip_markdown(message)
             try:
                 if image_url:
                     await self.bot.send_photo(
                         chat_id=CHANNEL_ID,
                         photo=image_url,
-                        caption=message,
+                        caption=clean_text,
                     )
                 else:
                     await self.bot.send_message(
                         chat_id=CHANNEL_ID,
-                        text=message,
+                        text=clean_text,
                         disable_web_page_preview=False
                     )
                 return True
             except Exception as e2:
-                print(f"[Poster] Plain text fallback also failed: {e2}")
-                return False
+                # Final attempt — strip and send without image too
+                try:
+                    await self.bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=clean_text[:1024] if len(clean_text) > 1024 else clean_text,
+                    )
+                    return True
+                except Exception as e3:
+                    print(f"[Poster] All attempts failed: {e3}")
+                    return False
+
+    def _strip_markdown(self, text: str) -> str:
+        """Remove all MarkdownV2 formatting for clean plain text fallback.
+
+        Removes backslash escapes, bold/italic markers, strikethrough,
+        and link syntax — keeps the visible text readable.
+        """
+        # Remove backslash escapes (e.g. \. → ., \# → #, \| → |)
+        text = re.sub(r'\\(.)', r'\1', text)
+        # Remove strikethrough markers ~~
+        text = text.replace('~~', '')
+        # Remove bold/italic markers
+        text = re.sub(r'[*_]', '', text)
+        return text
