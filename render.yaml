@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: coursedrop-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false       # You enter this manually in Render dashboard
+      - key: CHANNEL_ID
+        sync: false
+    autoDeploy: true      # Auto-deploy on every GitHub push
