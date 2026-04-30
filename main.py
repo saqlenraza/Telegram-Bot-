@@ -76,8 +76,11 @@ async def run_cycle():
             # Format Telegram message
             message = format_message(course)
 
-            # Post to channel
-            success = await poster.post(message)
+            # Post to channel (with thumbnail if available)
+            success = await poster.post(
+                message=message,
+                image_url=course.get("image_url")
+            )
 
             if success:
                 dedup.mark_posted(course)

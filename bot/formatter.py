@@ -1,99 +1,119 @@
 """
 CourseDrop Bot — Message Formatter
-Formats each course dict into a beautiful Telegram Markdown message.
-Includes relevant emoji by category for visual appeal.
+Formats each course dict into a professional Telegram MarkdownV2 message.
+Includes rating badge, price strikethrough, and category hashtags.
 """
 
-# Category → Emoji mapping
-CATEGORY_EMOJI = {
-    "development":        "💻",
-    "programming":        "💻",
-    "python":             "🐍",
-    "web development":    "🌐",
-    "design":             "🎨",
-    "graphic design":     "🎨",
-    "business":           "💼",
-    "marketing":          "📣",
-    "finance":            "💰",
-    "music":              "🎵",
-    "photography":        "📷",
-    "health":             "❤️",
-    "fitness":            "💪",
-    "data science":       "📊",
-    "machine learning":   "🤖",
-    "artificial":         "🤖",
-    "it & software":      "🖥️",
-    "office productivity":"📋",
-    "personal development":"🌱",
-    "teaching":           "📚",
-    "language":           "🗣️",
-}
-
-
-def get_emoji(category: str | None) -> str:
-    """Get the most relevant emoji for a course category."""
-    if not category:
-        return "🎓"  # default
-    cat = category.lower()
-    for key, emoji in CATEGORY_EMOJI.items():
-        if key in cat:
-            return emoji
-    return "🎓"  # default
+import re
 
 
 def format_message(course: dict) -> str:
-    """Format a course dict into a Telegram Markdown message.
+    """Format a course dict into a professional Telegram MarkdownV2 message.
 
     Output format:
-        {emoji} *FREE Udemy Course!*
+        ⭐ 4.6 | ~~$199.99~~ Limited FREE
 
-        📚 *{title}*
+        📚 *Course Title*
 
-        🏷️ Category: {category}
-        ⚡ Limited Time — Expires Soon!
+        🏷️ Category
+        👥 X Students Enrolled
 
-        👉 [Enroll FREE Now]({url})
+        👉 [Get Premium Course](url)
 
-        🔔 Get more free courses → @CourseDrop
-
-        #FreeCourse #Udemy #LearnFree #FreeEducation #{source}
+        #FreeCourses #Udemy #Category #Learning
     """
-    category = course.get("category") or "Course"
-    emoji    = get_emoji(category)
     title    = course.get("title") or "Free Course"
     url      = course.get("udemy_url") or course.get("source_url", "")
-    source   = course.get("source") or "CourseDrop"
+    category = course.get("category") or "Course"
+    rating   = course.get("rating")
+    price    = course.get("original_price")
+    students = course.get("students")
 
-    # Escape Markdown special characters in title
-    # Only escape characters that would break Markdown parsing
-    title = _escape_markdown(title)
+    lines = []
 
-    return (
-        f"{emoji} *FREE Udemy Course!*\n"
-        f"\n"
-        f"📚 *{title}*\n"
-        f"\n"
-        f"🏷️ Category: {category}\n"
-        f"⚡ Limited Time — Expires Soon!\n"
-        f"\n"
-        f"👉 [Enroll FREE Now]({url})\n"
-        f"\n"
-        f"🔔 Get more free courses → @CourseDrop\n"
-        f"\n"
-        f"#FreeCourse #Udemy #LearnFree #FreeEducation #{source.replace(' ', '')}"
-    )
+    # ── Rating + Price line ─────────────────────────────────────────
+    if rating:
+        if price:
+            # "⭐ 4.6 | ~~$199.99~~ Limited FREE"
+            rating_escaped   = _escape_markdown_v2(rating)
+            price_escaped    = _escape_markdown_v2(price)
+            lines.append(f"⭐ {rating_escaped} \\| ~~{price_escaped}~~ Limited FREE")
+        else:
+            rating_escaped = _escape_markdown_v2(rating)
+            lines.append(f"⭐ {rating_escaped} \\| Limited FREE")
+    else:
+        if price:
+            price_escaped = _escape_markdown_v2(price)
+            lines.append(f"~~{price_escaped}~~ Limited FREE")
+        else:
+            lines.append("Limited FREE")
+
+    # ── Blank line ──────────────────────────────────────────────────
+    lines.append("")
+
+    # ── Course Title (bold) ─────────────────────────────────────────
+    title_escaped = _escape_markdown_v2(title)
+    lines.append(f"📚 *{title_escaped}*")
+
+    # ── Blank line ──────────────────────────────────────────────────
+    lines.append("")
+
+    # ── Category ────────────────────────────────────────────────────
+    category_escaped = _escape_markdown_v2(category)
+    lines.append(f"🏷️ {category_escaped}")
+
+    # ── Students Enrolled ───────────────────────────────────────────
+    if students:
+        students_escaped = _escape_markdown_v2(str(students))
+        lines.append(f"👥 {students_escaped} Students Enrolled")
+
+    # ── Blank line ──────────────────────────────────────────────────
+    lines.append("")
+
+    # ── Get Premium Course button ───────────────────────────────────
+    # URL inside () of MarkdownV2 link does NOT need escaping
+    lines.append(f"👉 [Get Premium Course]({url})")
+
+    # ── Blank line ──────────────────────────────────────────────────
+    lines.append("")
+
+    # ── Hashtags ────────────────────────────────────────────────────
+    category_hashtag = _make_category_hashtag(category)
+    lines.append(f"#FreeCourses #Udemy {category_hashtag} #Learning")
+
+    return "\n".join(lines)
 
 
-def _escape_markdown(text: str) -> str:
-    """Escape Markdown special characters in text that would break formatting.
+def _escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2.
 
-    Only escapes characters that could interfere with Telegram Markdown:
-    * (bold), _ (italic), [ (link start)
-    Does NOT escape characters inside URLs — those are handled by Telegram.
+    MarkdownV2 requires escaping these characters with backslash:
+    _ * [ ] ( ) ~ ` > # + - = | { } . !
     """
-    # Replace problematic chars but preserve readability
-    text = text.replace("*", "✦")
-    text = text.replace("_", " ")
-    text = text.replace("[", "(")
-    text = text.replace("]", ")")
-    return text
+    special_chars = r'_*[]()~`>#+-=|{}.!'
+    escaped = []
+    for char in text:
+        if char in special_chars:
+            escaped.append('\\' + char)
+        else:
+            escaped.append(char)
+    return ''.join(escaped)
+
+
+def _make_category_hashtag(category: str) -> str:
+    """Convert category to PascalCase hashtag.
+
+    Examples:
+        "web development" → "#WebDevelopment"
+        "IT & Software"   → "#ItSoftware"
+        "data science"    → "#DataScience"
+        "Python"          → "#Python"
+    """
+    # Remove special characters except spaces
+    cleaned = re.sub(r'[^a-zA-Z0-9\s]', '', category)
+    # Split into words and capitalize each
+    words = cleaned.split()
+    hashtag = ''.join(word.capitalize() for word in words)
+    if not hashtag:
+        hashtag = "Course"
+    return f"#{hashtag}"
