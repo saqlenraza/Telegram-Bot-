@@ -10,7 +10,7 @@ load_dotenv()
 
 # ── Telegram Bot ──────────────────────────────────────────────────────
 BOT_TOKEN  = os.getenv("BOT_TOKEN")        # Set in Render environment variables
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@CourseDrop")  # Your channel username
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@udemycoursedrop")  # Your channel username
 
 # ── Source Channels to Monitor ────────────────────────────────────────
 # These Telegram channels post free Udemy courses — we scrape their
