@@ -5,8 +5,6 @@ free Udemy courses. Replaces RSS scraping which was blocked
 by cloud server IPs on coupon aggregator websites.
 """
 
-from telethon import TelegramClient
-from telethon.sessions import StringSession
 import re
 
 UDEMY_PATTERN = re.compile(
@@ -29,6 +27,11 @@ TITLE_PREFIXES = ['FREE:', 'Free:', '🎓', '📚', '100% OFF', '[100% OFF]',
 class TelegramMonitor:
 
     def __init__(self, api_id: int, api_hash: str, session_string: str):
+        # Lazy import — only create client when actually needed
+        # This avoids crashes if telethon is installed but credentials are invalid
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+
         self.client = TelegramClient(
             StringSession(session_string),
             api_id,
