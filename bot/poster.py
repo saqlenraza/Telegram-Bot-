@@ -2,12 +2,13 @@
 CourseDrop Bot — Telegram Channel Poster
 Sends formatted messages with course thumbnail to the Telegram channel.
 Uses MarkdownV2 parse mode and send_photo for rich media posts.
-Multi-tier fallback: MarkdownV2 → stripped plain text → text-only.
+Multi-tier fallback: photo+MarkdownV2 → text+MarkdownV2 → stripped plain text.
 Handles errors gracefully — bot never crashes on a single failed post.
 """
 
+import os
 import re
-from telegram import Bot
+from telegram import Bot, InputFile
 from telegram.constants import ParseMode
 from config import BOT_TOKEN, CHANNEL_ID
 
@@ -21,48 +22,52 @@ class TelegramPoster:
         """
         Send message to channel with optional thumbnail image.
 
-        Tries MarkdownV2 first. If that fails, strips markdown and
-        sends clean plain text. Never crashes — always returns True/False.
+        Tries MarkdownV2 first with photo, then text-only MarkdownV2,
+        then stripped plain text. Never crashes — always returns True/False.
 
         Returns True on success, False on failure.
         """
-        try:
-            # ── Attempt 1: Photo with MarkdownV2 caption ──────────────
-            if image_url:
-                try:
+        # ── Attempt 1: Photo with MarkdownV2 caption ──────────────────
+        if image_url and os.path.exists(str(image_url)):
+            try:
+                with open(str(image_url), 'rb') as photo_file:
                     await self.bot.send_photo(
                         chat_id=CHANNEL_ID,
-                        photo=image_url,
+                        photo=photo_file,
                         caption=message,
                         parse_mode=ParseMode.MARKDOWN_V2,
                     )
-                    return True
-                except Exception:
-                    pass  # Fall through to text-only
-
-            # ── Attempt 2: Text message with MarkdownV2 ───────────────
-            try:
-                await self.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=message,
-                    parse_mode=ParseMode.MARKDOWN_V2,
-                    disable_web_page_preview=False,
-                )
+                print("  ✅ Posted with photo + MarkdownV2")
                 return True
             except Exception as e:
-                print(f"[Poster] MarkdownV2 failed: {e}")
+                print(f"  ⚠️ Photo+MarkdownV2 failed: {e}")
+                # Fall through to text-only attempts
 
-                # ── Attempt 3: Strip markdown, send plain text ────────
-                clean = self._strip_markdown(message)
-                await self.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=clean,
-                    disable_web_page_preview=False,
-                )
-                return True
-
+        # ── Attempt 2: Text message with MarkdownV2 ───────────────────
+        try:
+            await self.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=message,
+                parse_mode=ParseMode.MARKDOWN_V2,
+                disable_web_page_preview=False,
+            )
+            print("  ✅ Posted with MarkdownV2 (text only)")
+            return True
         except Exception as e:
-            print(f"[Poster] All attempts failed: {e}")
+            print(f"  ⚠️ MarkdownV2 failed: {e}")
+
+        # ── Attempt 3: Strip markdown, send clean plain text ──────────
+        try:
+            clean = self._strip_markdown(message)
+            await self.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=clean,
+                disable_web_page_preview=False,
+            )
+            print("  ✅ Posted with plain text (fallback)")
+            return True
+        except Exception as e:
+            print(f"  ❌ All posting attempts failed: {e}")
             return False
 
     def _strip_markdown(self, text: str) -> str:

@@ -9,6 +9,7 @@ IMPORTANT: TelegramClient is created inside the async function
 RuntimeError: "There is no current event loop in thread 'MainThread'".
 """
 
+import os
 import re
 import urllib.parse as up
 from telethon import TelegramClient
@@ -30,18 +31,40 @@ RATING_PATTERN = re.compile(
 
 # Prefixes commonly used by coupon channels — strip these to get clean title
 TITLE_PREFIXES = ['FREE:', 'Free:', '🎓', '📚', '100% OFF', '[100% OFF]',
-                  '🔥', '🆓', '✅', '⭐', '👉', '💯']
+                  '🔥', '🆓', '✅', '⭐', '👉', '💯', '📢', '🎁',
+                  'Free Course:', 'FREE COURSE:', 'Udemy Free:',
+                  'Free Udemy Course:', '[Free]', '[FREE]']
 
-# Free course signals in message text
+# Free course signals in message text — expanded to catch more variations
 FREE_SIGNALS = [
     "100% off", "100% free", "free course",
     "coupon", "enroll free", "limited free",
-    "free for", "freediscount", "100off"
+    "free for", "freediscount", "100off",
+    "free udemy", "0 free", "no cost",
+    "zero cost", "off 100%", "100 off",
+    "$0", "₹0", "0.00",
+    "free coupon", "free enrollment",
+    "grab free", "get free", "free access",
+    "coupon code", "couponcode",
+    "deal code", "deal_code",
+    "100% discount", "full discount",
 ]
 
 # Paid course signals — if found without free signal, skip
-PAID_SIGNALS = ["₹", "$9", "$19", "$29",
-                "buy now", "purchase"]
+# Expanded to catch more paid patterns
+PAID_SIGNALS = [
+    "₹", "$9", "$19", "$29",
+    "buy now", "purchase",
+    "$4.99", "$9.99", "$12.99", "$14.99",
+    "$24.99", "$34.99", "$49.99", "$74.99", "$99.99",
+    "₹449", "₹649", "₹999", "₹1999",
+    "discounted price", "sale price",
+    "subscribe", "premium access", "pro plan",
+    "paid course", "not free",
+]
+
+# Temp directory for downloaded photos
+PHOTO_DIR = "/tmp/coursedrop_photos"
 
 
 class TelegramMonitor:
@@ -71,6 +94,9 @@ class TelegramMonitor:
 
         courses = []
 
+        # Ensure photo directory exists
+        os.makedirs(PHOTO_DIR, exist_ok=True)
+
         # Create client INSIDE async function — fixes Python 3.14 issue
         client = TelegramClient(
             StringSession(self.session_string),
@@ -88,9 +114,22 @@ class TelegramMonitor:
                     for msg in msgs:
                         course = self._parse_message(msg, channel)
                         if course:
+                            # ── Download photo if message has one ──────
+                            if msg.photo:
+                                try:
+                                    photo_path = await client.download_media(
+                                        msg,
+                                        file=os.path.join(PHOTO_DIR, f"{msg.id}.jpg")
+                                    )
+                                    if photo_path:
+                                        course["image_url"] = photo_path
+                                        print(f"  📸 Downloaded photo: {photo_path}")
+                                except Exception as e:
+                                    print(f"  ⚠️ Photo download failed: {e}")
+
                             channel_courses.append(course)
                     courses.extend(channel_courses)
-                    print(f"[{channel}] Fetched {len(channel_courses)} courses")
+                    print(f"[{channel}] Fetched {len(channel_courses)} FREE courses")
                 except Exception as e:
                     print(f"[{channel}] Error: {e}")
 
@@ -116,11 +155,12 @@ class TelegramMonitor:
 
         udemy_url = udemy_match.group(0)
 
-        # ── PROBLEM 1 FIX: Must be a free course ──────────────────────
-        if not self._is_free_course(text, udemy_url):
+        # ── FILTER: Must be a free course ──────────────────────────
+        is_free = self._is_free_course(text, udemy_url)
+        if not is_free:
             return None  # Skip paid courses
 
-        # ── PROBLEM 2 FIX: Clean the URL — keep only coupon params ────
+        # ── Clean the URL — keep only coupon params ────────────────
         udemy_url = self._clean_udemy_url(udemy_url)
 
         # ── Extract title ─────────────────────────────────────────────
@@ -133,14 +173,15 @@ class TelegramMonitor:
             if title.startswith(prefix):
                 title = title.replace(prefix, '', 1).strip()
 
+        # If title is just a URL, try the next line
+        if title.startswith("http") and len(lines) > 1:
+            title = lines[1]
+            for prefix in TITLE_PREFIXES:
+                if title.startswith(prefix):
+                    title = title.replace(prefix, '', 1).strip()
+
         # Truncate long titles
         title = title[:200] or "Free Course"
-
-        # ── Extract image ─────────────────────────────────────────────
-        # If the message has a photo, store its file_id for later use
-        image_url = None
-        if msg.photo:
-            image_url = str(msg.photo.id)
 
         # ── Extract price from text ───────────────────────────────────
         original_price = self._extract_price(text)
@@ -158,20 +199,21 @@ class TelegramMonitor:
             "source_url":     udemy_url,
             "source":         source_channel,
             "category":       "Course",
-            "image_url":      None,   # handled separately via tg_msg
+            "image_url":      None,   # filled later by fetch_recent_courses
             "original_price": original_price,
             "rating":         rating,
-            "tg_msg":         msg,    # keep original message for photo access
         }
 
     def _is_free_course(self, text: str, url: str) -> bool:
         """Check if a course message is for a FREE course.
 
+        STRICT MODE — defaults to False (skip uncertain courses).
+
         Logic:
         1. If URL contains couponCode — definitely free (strongest signal)
         2. If text has FREE_SIGNALS — likely free
         3. If text has PAID_SIGNALS without FREE_SIGNALS — paid, skip
-        4. Default: allow (messages from known free channels)
+        4. Default: SKIP (strict — don't post uncertain courses)
         """
         text_lower = text.lower()
         url_lower  = url.lower()
@@ -180,6 +222,8 @@ class TelegramMonitor:
         if "couponcode=" in url_lower:
             return True
         if "coupon_code=" in url_lower:
+            return True
+        if "deal_code=" in url_lower:
             return True
 
         # Free signals in text
@@ -192,9 +236,16 @@ class TelegramMonitor:
             return True
         if has_paid and not has_free:
             return False
+        if has_free and has_paid:
+            # Both signals present — free signal takes priority
+            # (source channels often show original price alongside FREE label)
+            return True
 
-        # Default: if from known free course channels, allow
-        return True
+        # STRICT DEFAULT: skip uncertain courses
+        # Messages without coupon code AND without free signals
+        # are likely expired deals or paid courses
+        print(f"  ⏭️ Skipped (no free signal): {text[:80]}...")
+        return False
 
     def _clean_udemy_url(self, url: str) -> str:
         """Clean a Udemy URL — remove tracking params, keep only couponCode.
@@ -220,6 +271,7 @@ class TelegramMonitor:
                     parsed.path, '', query, ''
                 ))
             else:
+                # No coupon params — strip all tracking params
                 clean_url = up.urlunparse((
                     parsed.scheme, parsed.netloc,
                     parsed.path, '', '', ''
