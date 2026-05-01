@@ -9,6 +9,7 @@ IMPORTANT: TelegramClient is created inside the async function
 RuntimeError: "There is no current event loop in thread 'MainThread'".
 """
 
+import asyncio
 import os
 import re
 import urllib.parse as up
@@ -112,7 +113,9 @@ class TelegramMonitor:
                     )
                     channel_courses = []
                     for msg in msgs:
-                        course = self._parse_message(msg, channel)
+                        course = await asyncio.to_thread(
+                            self._parse_message, msg, channel
+                        )
                         if course:
                             # ── Download photo if message has one ──────
                             if msg.photo:
@@ -135,12 +138,18 @@ class TelegramMonitor:
 
         return courses
 
+    # Broader URL pattern — catches intermediate links too
+    ANY_URL_PATTERN = re.compile(
+        r'https?://[^"\'\s<>)]+'
+    )
+
     def _parse_message(self, msg, source_channel: str) -> dict | None:
         """Parse a Telegram message into a course dict.
 
         Only processes messages that:
-        1. Contain a valid Udemy course URL
-        2. Are confirmed to be FREE courses (have coupon code or free signals)
+        1. Contain a URL (Udemy direct or intermediate link)
+        2. Resolve to a Udemy coupon URL via _resolve_to_udemy_url()
+        3. Are confirmed to be FREE courses (have coupon code)
         Extracts title, price, rating from the message text where available.
         """
         if not msg.text:
@@ -148,20 +157,31 @@ class TelegramMonitor:
 
         text = msg.text
 
-        # Must contain a Udemy course URL — skip messages without one
+        # ── Find the first URL in the message ────────────────────────
+        # Try Udemy URL first (direct link)
         udemy_match = UDEMY_URL_PATTERN.search(text)
-        if not udemy_match:
-            return None
+        if udemy_match:
+            raw_url = udemy_match.group(0)
+        else:
+            # No direct Udemy URL — look for any URL (intermediate link)
+            any_match = self.ANY_URL_PATTERN.search(text)
+            if not any_match:
+                return None
+            raw_url = any_match.group(0)
 
-        udemy_url = udemy_match.group(0)
+        # ── Resolve intermediate URL to direct Udemy coupon link ─────
+        resolved = self._resolve_to_udemy_url(raw_url)
+        if not resolved:
+            return None  # No free coupon found — skip
 
-        # ── FILTER: Must be a free course ──────────────────────────
-        is_free = self._is_free_course(text, udemy_url)
-        if not is_free:
-            return None  # Skip paid courses
+        udemy_url = resolved
 
         # ── Clean the URL — keep only coupon params ────────────────
         udemy_url = self._clean_udemy_url(udemy_url)
+
+        # ── Verify coupon code exists after cleaning ────────────────
+        if "couponCode=" not in udemy_url and "coupon_code=" not in udemy_url and "deal_code=" not in udemy_url:
+            return None  # No coupon after cleaning — likely paid
 
         # ── Extract title ─────────────────────────────────────────────
         # First non-empty line is usually the title
@@ -203,6 +223,70 @@ class TelegramMonitor:
             "original_price": original_price,
             "rating":         rating,
         }
+
+    def _resolve_to_udemy_url(self, url: str) -> str | None:
+        """Resolve a URL (direct or intermediate) to a Udemy coupon URL.
+
+        Handles:
+        - Direct Udemy URLs with couponCode → return as-is
+        - Direct Udemy URLs WITHOUT couponCode → None (paid course)
+        - Intermediate links (e.g. discudemy.com) → fetch page,
+          search for Udemy coupon URL in HTML response
+
+        Returns the resolved Udemy coupon URL, or None if no coupon found.
+        """
+        import httpx
+
+        HEADERS = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0;"
+                         " Win64; x64) AppleWebKit/537.36"
+        }
+
+        UDEMY_COUPON_PATTERN = re.compile(
+            r'https?://(?:www\.)?udemy\.com/course/'
+            r'[a-zA-Z0-9_-]+/?'
+            r'\?[^"\'\s<>]*couponCode=[^"\'\s<>]+'
+        )
+
+        try:
+            # Already direct Udemy coupon link
+            if "udemy.com/course/" in url:
+                if "couponCode=" in url:
+                    return url
+                else:
+                    return None  # Paid — skip
+
+            # Fetch intermediate page
+            resp = httpx.get(
+                url, headers=HEADERS,
+                timeout=15, follow_redirects=True
+            )
+            if resp.status_code != 200:
+                return None
+
+            # Search for Udemy coupon URL in response text
+            match = UDEMY_COUPON_PATTERN.search(resp.text)
+            if match:
+                udemy_url = match.group(0)
+                # Clean any trailing HTML artifacts
+                udemy_url = udemy_url.split('"')[0]
+                udemy_url = udemy_url.split("'")[0]
+                return udemy_url
+
+            # BeautifulSoup fallback — search all <a> tags
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "lxml")
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if ("udemy.com/course/" in href
+                        and "couponCode=" in href):
+                    return href
+
+            return None  # No coupon found — skip
+
+        except Exception as e:
+            print(f"[Resolver] Error resolving {url[:60]}: {e}")
+            return None
 
     def _is_free_course(self, text: str, url: str) -> bool:
         """Check if a course message is for a FREE course.

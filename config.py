@@ -21,11 +21,9 @@ SESSION_STRING = os.getenv("SESSION_STRING", "")
 # These Telegram channels post free Udemy courses — we monitor them
 # and forward filtered messages to our channel
 SOURCE_CHANNELS = [
-    "@tutorialbar_udemy_coupons",
-    "@discudemy",
-    "@realdiscount",
-    "@udemyfreebies",
-    "@couponscorpion",
+    "@Udemy7",
+    "@Udemy_Courses_Free_Daily",
+    "@Udemy4U",
 ]
 
 # ── RSS Feed Sources (LEGACY — kept for fallback) ────────────────────
