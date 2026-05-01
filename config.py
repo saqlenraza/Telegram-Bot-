@@ -16,9 +16,8 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "@udemycoursedrop")  # Your channel usernam
 # These Telegram channels post free Udemy courses — we scrape their
 # public web previews at t.me/s/channel (no authentication needed)
 SOURCE_CHANNELS = [
-    "Udemy7",
-    "Udemy_Courses_Free_Daily",
-    "Udemy4U",
+    "udemycodes",
+    "udemycoupons4u",
 ]
 
 # ── Scheduler ─────────────────────────────────────────────────────────
