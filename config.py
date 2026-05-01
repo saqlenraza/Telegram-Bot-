@@ -13,7 +13,7 @@ BOT_TOKEN  = os.getenv("BOT_TOKEN")        # Set in Render environment variables
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@CourseDrop")  # Your channel username
 
 # ── Telegram API credentials (get from my.telegram.org) ──────────────
-API_ID        = int(os.getenv("API_ID", "0"))
+API_ID        = int(os.getenv("API_ID", "0") or "0")
 API_HASH      = os.getenv("API_HASH", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "")
 

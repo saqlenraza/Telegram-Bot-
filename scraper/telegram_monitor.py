@@ -3,9 +3,15 @@ CourseDrop Bot — Telegram Channel Monitor
 Uses Telethon to monitor source Telegram channels that post
 free Udemy courses. Replaces RSS scraping which was blocked
 by cloud server IPs on coupon aggregator websites.
+
+IMPORTANT: TelegramClient is created inside the async function
+(fetch_recent_courses), NOT in __init__. This fixes the Python 3.14
+RuntimeError: "There is no current event loop in thread 'MainThread'".
 """
 
 import re
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 UDEMY_PATTERN = re.compile(
     r'https?://(?:www\.)?udemy\.com/course/[\w-]+'
@@ -26,17 +32,11 @@ TITLE_PREFIXES = ['FREE:', 'Free:', '🎓', '📚', '100% OFF', '[100% OFF]',
 
 class TelegramMonitor:
 
-    def __init__(self, api_id: int, api_hash: str, session_string: str):
-        # Lazy import — only create client when actually needed
-        # This avoids crashes if telethon is installed but credentials are invalid
-        from telethon import TelegramClient
-        from telethon.sessions import StringSession
-
-        self.client = TelegramClient(
-            StringSession(session_string),
-            api_id,
-            api_hash
-        )
+    def __init__(self, api_id, api_hash, session_string):
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.session_string = session_string
+        self.ready = bool(api_id and api_hash and session_string)
 
     async def fetch_recent_courses(
         self,
@@ -47,22 +47,36 @@ class TelegramMonitor:
         Fetch recent messages from source channels.
         Returns list of course dicts — same format as RSSFetcher
         so the rest of the pipeline (dedup, formatter, poster) works unchanged.
+
+        TelegramClient is created INSIDE this async function to avoid
+        the Python 3.14 event loop error on module-level instantiation.
         """
+        if not self.ready:
+            print("Telethon not configured — skipping")
+            return []
+
         courses = []
 
-        async with self.client:
+        # Create client INSIDE async function — fixes Python 3.14 issue
+        client = TelegramClient(
+            StringSession(self.session_string),
+            self.api_id,
+            self.api_hash
+        )
+
+        async with client:
             for channel in source_channels:
                 try:
-                    msgs = await self.client.get_messages(
+                    msgs = await client.get_messages(
                         channel, limit=limit
                     )
-                    fetched_count = 0
+                    channel_courses = []
                     for msg in msgs:
                         course = self._parse_message(msg, channel)
                         if course:
-                            courses.append(course)
-                            fetched_count += 1
-                    print(f"[{channel}] Fetched {fetched_count} courses from {len(msgs)} messages")
+                            channel_courses.append(course)
+                    courses.extend(channel_courses)
+                    print(f"[{channel}] Fetched {len(channel_courses)} courses")
                 except Exception as e:
                     print(f"[{channel}] Error: {e}")
 
