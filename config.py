@@ -12,6 +12,15 @@ load_dotenv()
 BOT_TOKEN  = os.getenv("BOT_TOKEN")        # Set in Render environment variables
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@CourseDrop")  # Your channel username
 
+# ── Source Channels to Monitor ────────────────────────────────────────
+# These Telegram channels post free Udemy courses — we scrape their
+# public web previews at t.me/s/channel (no authentication needed)
+SOURCE_CHANNELS = [
+    "Udemy7",
+    "Udemy_Courses_Free_Daily",
+    "Udemy4U",
+]
+
 # ── Scheduler ─────────────────────────────────────────────────────────
 SCRAPE_INTERVAL_MINUTES = 30   # Run every 30 minutes
 POST_DELAY_SECONDS      = 3    # Gap between Telegram posts (rate limit)

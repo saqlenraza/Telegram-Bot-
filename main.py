@@ -1,15 +1,18 @@
 """
 CourseDrop Bot — Entry Point
-The brain. Starts health server, scrapes courson.xyz for free courses,
-then schedules every 30 minutes forever.
+The brain. Starts health server, scrapes Telegram channel web previews
+for free Udemy courses, then schedules every 30 minutes forever.
+
+Uses t.me/s/ public channel previews — no authentication needed,
+no Telethon, no SESSION_STRING, no IP blocking issues.
 """
 
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import (SCRAPE_INTERVAL_MINUTES, POST_DELAY_SECONDS,
-                    BOT_TOKEN, CHANNEL_ID)
-from scraper.courson_scraper import CoursonScraper
+                    BOT_TOKEN, CHANNEL_ID, SOURCE_CHANNELS)
+from scraper.telegram_web_scraper import TelegramWebScraper
 from filters.dedup import DedupFilter
 from bot.formatter import format_message
 from bot.poster import TelegramPoster
@@ -17,7 +20,7 @@ from db.database import Database
 from health.server import start_health_server
 
 # ── Initialise components ─────────────────────────────────────────────
-scraper = CoursonScraper()
+scraper = TelegramWebScraper(channels=SOURCE_CHANNELS)
 db      = Database()
 dedup   = DedupFilter(db)
 poster  = TelegramPoster()
@@ -66,7 +69,7 @@ async def run_cycle():
     failed_count = 0
 
     try:
-        # Scrape courson.xyz for free courses (sync — uses httpx)
+        # Scrape Telegram channel web previews (sync — uses httpx)
         courses = await asyncio.to_thread(scraper.fetch_courses, pages=2)
         print(f"📥 Total courses fetched: {len(courses)}")
     except Exception as e:
@@ -112,9 +115,10 @@ async def run_cycle():
 async def main():
     print("🚀 CourseDrop Bot starting...")
     print(f"   Channel: {CHANNEL_ID}")
-    print(f"   Scraper: courson.xyz")
+    print(f"   Source channels: {', '.join('@' + c for c in SOURCE_CHANNELS)}")
+    print(f"   Scraper: t.me/s/ web previews")
     print(f"   Scrape interval: every {SCRAPE_INTERVAL_MINUTES} minutes")
-    print(f"   Min rating: 4.3 | Min uses: 1")
+    print(f"   Min rating: {4.3}")
 
     # Check bot token access — MUST have this
     bot_ok = await check_bot_access()
