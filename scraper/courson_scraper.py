@@ -53,14 +53,19 @@ class CoursonScraper:
     def _scrape_page(self, url: str) -> list:
         """Fetch a courson.xyz coupons page and parse course cards."""
         try:
+            print(f"[Courson] Fetching: {url}")
             resp = httpx.get(
                 url, headers=HEADERS,
                 timeout=20, follow_redirects=True
             )
+            print(f"[Courson] Response: {resp.status_code}")
+            print(f"[Courson] HTML length: {len(resp.text)}")
             if resp.status_code != 200:
                 print(f"[Courson] HTTP {resp.status_code}")
                 return []
-            return self._parse_page(resp.text)
+            courses = self._parse_page(resp.text)
+            print(f"[Courson] Courses parsed: {len(courses)}")
+            return courses
         except Exception as e:
             print(f"[Courson] Fetch error: {e}")
             return []
@@ -210,6 +215,7 @@ class CoursonScraper:
         Returns the Udemy coupon URL, or None if not found.
         """
         try:
+            print(f"[Courson] Resolving: {courson_detail_url}")
             resp = httpx.get(
                 courson_detail_url,
                 headers=HEADERS,
@@ -217,6 +223,7 @@ class CoursonScraper:
                 follow_redirects=True
             )
             if resp.status_code != 200:
+                print(f"[Courson] Result: NONE (HTTP {resp.status_code})")
                 return None
 
             html = resp.text
@@ -230,13 +237,16 @@ class CoursonScraper:
             )
             match = UDEMY_PATTERN.search(html)
             if match:
-                return match.group(0).rstrip("\"'/")
+                udemy_url = match.group(0).rstrip("\"'/")
+                print(f"[Courson] Result: {udemy_url}")
+                return udemy_url
 
             # Method 2: BeautifulSoup <a> tag href search
             soup = BeautifulSoup(html, "lxml")
             for a in soup.find_all("a", href=True):
                 if ("udemy.com/course/" in a["href"]
                         and "couponCode=" in a["href"]):
+                    print(f"[Courson] Result: {a['href']}")
                     return a["href"]
 
             # Method 3: JavaScript string literals
@@ -249,10 +259,12 @@ class CoursonScraper:
                 html
             )
             if js_match:
-                return js_match.group(1)
+                udemy_url = js_match.group(1)
+                print(f"[Courson] Result: {udemy_url}")
+                return udemy_url
 
             # No coupon URL found — skip this course
-            print(f"  ⏭️ No Udemy coupon found: {courson_detail_url}")
+            print(f"[Courson] Result: NONE (no coupon found)")
             return None
 
         except Exception as e:
