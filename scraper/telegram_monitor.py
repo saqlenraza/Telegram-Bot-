@@ -10,12 +10,15 @@ RuntimeError: "There is no current event loop in thread 'MainThread'".
 """
 
 import re
+import urllib.parse as up
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-UDEMY_PATTERN = re.compile(
-    r'https?://(?:www\.)?udemy\.com/course/[\w-]+'
-    r'/?(?:\?[^\s"\'<>]*)?'
+# Updated pattern — captures full URL with coupon code parameters
+UDEMY_URL_PATTERN = re.compile(
+    r'https?://(?:www\.)?udemy\.com/course/'
+    r'[a-zA-Z0-9_-]+/?'
+    r'(?:\?[^"\'\s<>\)]*)?'
 )
 
 PRICE_PATTERN = re.compile(r'[\$£€][\d,]+\.?\d*')
@@ -28,6 +31,17 @@ RATING_PATTERN = re.compile(
 # Prefixes commonly used by coupon channels — strip these to get clean title
 TITLE_PREFIXES = ['FREE:', 'Free:', '🎓', '📚', '100% OFF', '[100% OFF]',
                   '🔥', '🆓', '✅', '⭐', '👉', '💯']
+
+# Free course signals in message text
+FREE_SIGNALS = [
+    "100% off", "100% free", "free course",
+    "coupon", "enroll free", "limited free",
+    "free for", "freediscount", "100off"
+]
+
+# Paid course signals — if found without free signal, skip
+PAID_SIGNALS = ["₹", "$9", "$19", "$29",
+                "buy now", "purchase"]
 
 
 class TelegramMonitor:
@@ -85,7 +99,9 @@ class TelegramMonitor:
     def _parse_message(self, msg, source_channel: str) -> dict | None:
         """Parse a Telegram message into a course dict.
 
-        Only processes messages that contain a valid Udemy course URL.
+        Only processes messages that:
+        1. Contain a valid Udemy course URL
+        2. Are confirmed to be FREE courses (have coupon code or free signals)
         Extracts title, price, rating from the message text where available.
         """
         if not msg.text:
@@ -94,11 +110,18 @@ class TelegramMonitor:
         text = msg.text
 
         # Must contain a Udemy course URL — skip messages without one
-        udemy_match = UDEMY_PATTERN.search(text)
+        udemy_match = UDEMY_URL_PATTERN.search(text)
         if not udemy_match:
             return None
 
         udemy_url = udemy_match.group(0)
+
+        # ── PROBLEM 1 FIX: Must be a free course ──────────────────────
+        if not self._is_free_course(text, udemy_url):
+            return None  # Skip paid courses
+
+        # ── PROBLEM 2 FIX: Clean the URL — keep only coupon params ────
+        udemy_url = self._clean_udemy_url(udemy_url)
 
         # ── Extract title ─────────────────────────────────────────────
         # First non-empty line is usually the title
@@ -140,6 +163,70 @@ class TelegramMonitor:
             "rating":         rating,
             "tg_msg":         msg,    # keep original message for photo access
         }
+
+    def _is_free_course(self, text: str, url: str) -> bool:
+        """Check if a course message is for a FREE course.
+
+        Logic:
+        1. If URL contains couponCode — definitely free (strongest signal)
+        2. If text has FREE_SIGNALS — likely free
+        3. If text has PAID_SIGNALS without FREE_SIGNALS — paid, skip
+        4. Default: allow (messages from known free channels)
+        """
+        text_lower = text.lower()
+        url_lower  = url.lower()
+
+        # Strongest signal — coupon code in URL
+        if "couponcode=" in url_lower:
+            return True
+        if "coupon_code=" in url_lower:
+            return True
+
+        # Free signals in text
+        has_free = any(s in text_lower for s in FREE_SIGNALS)
+
+        # Paid signals — if found without free signal, skip
+        has_paid = any(s in text_lower for s in PAID_SIGNALS)
+
+        if has_free and not has_paid:
+            return True
+        if has_paid and not has_free:
+            return False
+
+        # Default: if from known free course channels, allow
+        return True
+
+    def _clean_udemy_url(self, url: str) -> str:
+        """Clean a Udemy URL — remove tracking params, keep only couponCode.
+
+        Example:
+            Input:  https://www.udemy.com/course/python/?xref=abc&couponCode=FREE123&ref=mail
+            Output: https://www.udemy.com/course/python/?couponCode=FREE123
+        """
+        try:
+            parsed = up.urlparse(url)
+            params = up.parse_qs(parsed.query)
+
+            # Keep only coupon-related parameters
+            clean_params = {}
+            for key in ["couponCode", "coupon_code", "deal_code"]:
+                if key in params:
+                    clean_params[key] = params[key][0]
+
+            if clean_params:
+                query = up.urlencode(clean_params)
+                clean_url = up.urlunparse((
+                    parsed.scheme, parsed.netloc,
+                    parsed.path, '', query, ''
+                ))
+            else:
+                clean_url = up.urlunparse((
+                    parsed.scheme, parsed.netloc,
+                    parsed.path, '', '', ''
+                ))
+            return clean_url
+        except Exception:
+            return url
 
     def _extract_price(self, text: str) -> str | None:
         """Extract original price from message text.

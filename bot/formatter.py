@@ -11,7 +11,7 @@ def format_message(course: dict) -> str:
     """Format a course dict into a professional Telegram MarkdownV2 message.
 
     Output format:
-        ⭐ 4.6 | ~~$199.99~~ Limited FREE
+        ⭐ 4.6 | ~~$199.99~~ 🆓 100% OFF
 
         📚 *Course Title*
 
@@ -34,19 +34,19 @@ def format_message(course: dict) -> str:
     # ── Rating + Price line ─────────────────────────────────────────
     if rating:
         if price:
-            # "⭐ 4.6 | ~~$199.99~~ Limited FREE"
+            # "⭐ 4.6 | ~~$199.99~~ 🆓 100% OFF"
             rating_escaped   = _escape_markdown_v2(rating)
             price_escaped    = _escape_markdown_v2(price)
-            lines.append(f"⭐ {rating_escaped} \\| ~~{price_escaped}~~ Limited FREE")
+            lines.append(f"⭐ {rating_escaped} \\| ~~{price_escaped}~~ 🆓 100% OFF — Enroll Free")
         else:
             rating_escaped = _escape_markdown_v2(rating)
-            lines.append(f"⭐ {rating_escaped} \\| Limited FREE")
+            lines.append(f"⭐ {rating_escaped} \\| 🆓 100% OFF — Enroll Free")
     else:
         if price:
             price_escaped = _escape_markdown_v2(price)
-            lines.append(f"~~{price_escaped}~~ Limited FREE")
+            lines.append(f"~~{price_escaped}~~ 🆓 100% OFF — Enroll Free")
         else:
-            lines.append("Limited FREE")
+            lines.append("🆓 100% OFF — Enroll Free")
 
     # ── Blank line ──────────────────────────────────────────────────
     lines.append("")
