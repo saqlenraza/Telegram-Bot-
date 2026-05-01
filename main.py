@@ -1,17 +1,15 @@
 """
 CourseDrop Bot — Entry Point
-The brain. Starts health server, monitors Telegram source channels,
-then schedules every 20 minutes forever.
+The brain. Starts health server, scrapes courson.xyz for free courses,
+then schedules every 30 minutes forever.
 """
 
 import asyncio
-import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import (SCRAPE_INTERVAL_MINUTES, POST_DELAY_SECONDS,
-                    BOT_TOKEN, CHANNEL_ID,
-                    API_ID, API_HASH, SOURCE_CHANNELS)
-from scraper.telegram_monitor import TelegramMonitor
+                    BOT_TOKEN, CHANNEL_ID)
+from scraper.courson_scraper import CoursonScraper
 from filters.dedup import DedupFilter
 from bot.formatter import format_message
 from bot.poster import TelegramPoster
@@ -19,19 +17,10 @@ from db.database import Database
 from health.server import start_health_server
 
 # ── Initialise components ─────────────────────────────────────────────
-SESSION_STRING = os.getenv("SESSION_STRING", "")
-
-# Create monitor — __init__ no longer creates TelegramClient
-# (that happens inside fetch_recent_courses in async context)
-monitor = TelegramMonitor(
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=SESSION_STRING
-)
-
-db       = Database()
-dedup    = DedupFilter(db)
-poster   = TelegramPoster()
+scraper = CoursonScraper()
+db      = Database()
+dedup   = DedupFilter(db)
+poster  = TelegramPoster()
 
 
 async def check_bot_access():
@@ -68,56 +57,17 @@ async def check_bot_access():
     return True
 
 
-async def check_telethon_access():
-    """Verify Telethon session is valid by trying to connect."""
-    if not monitor.ready:
-        print("⚠️  Telethon not configured — skipping source channel monitoring.")
-        print("   To enable:")
-        print("   1. Go to https://my.telegram.org → create app → get API_ID + API_HASH")
-        print("   2. Run generate_session.py locally → get SESSION_STRING")
-        print("   3. Set API_ID, API_HASH, SESSION_STRING in Render environment variables")
-        return False
-
-    try:
-        # Create a temporary client to verify session works
-        from telethon import TelegramClient
-        from telethon.sessions import StringSession
-        client = TelegramClient(
-            StringSession(SESSION_STRING),
-            API_ID,
-            API_HASH
-        )
-        async with client:
-            me = await client.get_me()
-            print(f"📱 Telethon authenticated: {me.first_name} (@{me.username})")
-    except Exception as e:
-        print(f"❌ Telethon session invalid: {e}")
-        print("   Run generate_session.py locally to get a new SESSION_STRING.")
-        monitor.ready = False
-        return False
-
-    return True
-
-
 async def run_cycle():
-    """One complete monitor-filter-post cycle"""
-    print("\n🔄 Starting monitoring cycle...")
-
-    # Check if Telethon is ready before fetching
-    if not monitor.ready:
-        print("⏸️  Telethon not configured — skipping this cycle.")
-        print("   Set API_ID, API_HASH, SESSION_STRING in Render env vars.")
-        return
+    """One complete scrape-filter-post cycle"""
+    print("\n🔄 Starting scrape cycle...")
 
     posted_count = 0
     skipped_count = 0
     failed_count = 0
 
     try:
-        # Fetch recent messages from source Telegram channels
-        courses = await monitor.fetch_recent_courses(
-            SOURCE_CHANNELS, limit=20
-        )
+        # Scrape courson.xyz for free courses (sync — uses httpx)
+        courses = await asyncio.to_thread(scraper.fetch_courses, pages=2)
         print(f"📥 Total courses fetched: {len(courses)}")
     except Exception as e:
         print(f"❌ Failed to fetch courses: {e}")
@@ -162,9 +112,9 @@ async def run_cycle():
 async def main():
     print("🚀 CourseDrop Bot starting...")
     print(f"   Channel: {CHANNEL_ID}")
-    print(f"   Source channels: {len(SOURCE_CHANNELS)}")
-    print(f"   Telethon ready: {'Yes ✅' if monitor.ready else 'No ⚠️ (needs env vars)'}")
+    print(f"   Scraper: courson.xyz")
     print(f"   Scrape interval: every {SCRAPE_INTERVAL_MINUTES} minutes")
+    print(f"   Min rating: 4.3 | Min uses: 1")
 
     # Check bot token access — MUST have this
     bot_ok = await check_bot_access()
@@ -172,13 +122,10 @@ async def main():
         print("❌ Cannot continue without valid BOT_TOKEN. Exiting.")
         return
 
-    # Check Telethon session access (non-fatal if missing)
-    await check_telethon_access()
-
     # Start UptimeRobot health endpoint
     start_health_server()
 
-    # Run immediately on startup (will skip gracefully if Telethon not ready)
+    # Run immediately on startup
     await run_cycle()
 
     # Schedule every N minutes
